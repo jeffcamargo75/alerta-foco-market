@@ -1,0 +1,213 @@
+"""Avisa no Telegram quando um evento POOL novo é cadastrado na Foco Market.
+
+Cada execução: busca todos os eventos POOL futuros, compara com os já vistos
+(estado.json) e manda mensagem para os novos.
+"""
+import json
+import os
+import sys
+import time
+from datetime import date, datetime, timedelta
+from html import escape
+from pathlib import Path
+
+import requests
+
+SITE = "https://www.focomarket.com.br"
+URL_API = SITE + "/next-api/competition/future-list"
+URL_EVENTOS = SITE + "/competition/future"
+ARQUIVO_ESTADO = Path(__file__).with_name("estado.json")
+NAVEGADOR = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+)
+
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+FOCO_COOKIE = os.environ.get("FOCO_COOKIE", "").strip()
+
+
+class SessaoExpirada(Exception):
+    pass
+
+
+# ---------- Foco Market ----------
+
+def limpar_cookie(bruto):
+    """Aceita o valor copiado do navegador (com ou sem "cookie:" na frente)
+    e descarta os cookies do Cloudflare, que só valem no navegador de origem."""
+    if bruto.lower().startswith("cookie:"):
+        bruto = bruto[len("cookie:"):]
+    partes = [p.strip() for p in bruto.split(";") if "=" in p]
+    return "; ".join(
+        p for p in partes if not p.split("=", 1)[0].strip().lower().startswith(("__cf", "cf_"))
+    )
+
+
+def buscar_eventos_pool():
+    sessao = requests.Session()
+    sessao.headers.update({
+        "User-Agent": NAVEGADOR,
+        "Accept": "application/json",
+        "Referer": URL_EVENTOS,
+        "Cookie": limpar_cookie(FOCO_COOKIE),
+    })
+    # Sem data final a API só mostra os próximos 30 dias, e todo evento antigo
+    # que entrasse nessa janela pareceria "novo". Por isso pede 2 anos à frente.
+    ate = (date.today() + timedelta(days=730)).strftime("%d/%m/%Y")
+    filtros = {
+        "CompetitionSearch[is_spot]": "0",  # 0 = só eventos POOL
+        "CompetitionSearch[future_list_date_to]": ate,
+    }
+
+    eventos, pagina, total_paginas = [], 1, 1
+    while pagina <= total_paginas:
+        r = sessao.get(URL_API, params={**filtros, "page": pagina}, timeout=30, allow_redirects=False)
+        if r.is_redirect or (r.status_code in (401, 403) and "login" in r.text.lower()):
+            raise SessaoExpirada()
+        if r.status_code != 200:
+            raise RuntimeError(f"Foco Market respondeu HTTP {r.status_code}: {r.text[:300]}")
+        dados = r.json()
+        eventos.extend(dados["items"])
+        total_paginas = dados["_meta"]["pageCount"]
+        pagina += 1
+        time.sleep(0.5)  # sem pressa: não sobrecarregar o site
+
+    return [e for e in eventos if e.get("isPool")]
+
+
+# ---------- Telegram ----------
+
+def enviar_telegram(texto):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("[Telegram não configurado — mensagem só no log]\n" + texto + "\n")
+        return
+    for _ in range(3):
+        r = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            data={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": texto,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": "true",
+            },
+            timeout=20,
+        )
+        if r.status_code == 429:  # muitas mensagens seguidas: o Telegram diz quanto esperar
+            time.sleep(r.json().get("parameters", {}).get("retry_after", 5))
+            continue
+        if not r.ok:
+            raise RuntimeError(f"Telegram respondeu HTTP {r.status_code}: {r.text[:300]}")
+        time.sleep(1)
+        return
+    raise RuntimeError("Telegram recusou a mensagem 3 vezes seguidas (limite de envio).")
+
+
+def formatar_evento(e):
+    data = datetime.strptime(e["date"], "%Y-%m-%d").strftime("%d/%m/%Y")
+    local = e.get("place") or ""
+    uf = (e.get("state") or {}).get("abbreviation")
+    if uf:
+        local = f"{local} / {uf}" if local else uf
+
+    linhas = [f"<b>{escape(e['name'])}</b>", f"📅 {data}   📍 {escape(local)}"]
+    esporte = (e.get("sport") or {}).get("name")
+    selo = (e.get("partnershipBadge") or {}).get("label")
+    detalhe = " · ".join(x for x in (esporte, selo) if x)
+    if detalhe:
+        linhas.append(escape(detalhe))
+
+    vagas = e.get("eventSlotsAvailability")
+    if vagas is not None:
+        if vagas.get("availableSlots") is None:
+            texto_vagas = "Vagas: livre"
+        else:
+            texto_vagas = f"Vagas restantes: {vagas['availableSlots']}"
+        if vagas.get("minimumLevelName"):
+            texto_vagas += f" (nível mínimo: {vagas['minimumLevelName']})"
+        linhas.append("🎟 " + escape(texto_vagas))
+
+    if e.get("formatedRegisterDate"):
+        linhas.append(f"⏳ Cadastro até {escape(e['formatedRegisterDate'])}")
+    return "\n".join(linhas)
+
+
+def avisar_novos(novos):
+    # Até 5 eventos: uma mensagem cada. Mais que isso (cadastro em lote): agrupa de 10 em 10.
+    tamanho = 1 if len(novos) <= 5 else 10
+    for i in range(0, len(novos), tamanho):
+        grupo = novos[i:i + tamanho]
+        titulo = "🏁 <b>Novo evento POOL na Foco Market</b>" if len(grupo) == 1 else (
+            f"🏁 <b>{len(grupo)} novos eventos POOL na Foco Market</b>"
+        )
+        corpo = "\n\n".join(formatar_evento(e) for e in grupo)
+        enviar_telegram(f"{titulo}\n\n{corpo}\n\n{URL_EVENTOS}")
+        yield grupo
+
+
+# ---------- Estado ----------
+
+def carregar_estado():
+    if ARQUIVO_ESTADO.exists():
+        return json.loads(ARQUIVO_ESTADO.read_text(encoding="utf-8"))
+    return {"vistos": None, "avisou_sessao_expirada": False}
+
+
+def salvar_estado(estado):
+    ARQUIVO_ESTADO.write_text(json.dumps(estado, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+
+
+# ---------- Principal ----------
+
+def main():
+    if not FOCO_COOKIE:
+        sys.exit("Falta o secret FOCO_COOKIE (veja o LEIA-ME.md).")
+
+    estado = carregar_estado()
+    try:
+        eventos = buscar_eventos_pool()
+    except SessaoExpirada:
+        if not estado["avisou_sessao_expirada"]:
+            enviar_telegram(
+                "⚠️ <b>A sessão da Foco Market expirou.</b>\n"
+                "O alerta está parado. Entre de novo no site marcando \"Lembre-me\" e "
+                "atualize o secret FOCO_COOKIE no GitHub (passo 3 do LEIA-ME)."
+            )
+            estado["avisou_sessao_expirada"] = True
+            salvar_estado(estado)
+        sys.exit("Sessão da Foco Market expirada: atualize o FOCO_COOKIE.")
+
+    if not eventos:
+        sys.exit("Nenhum evento POOL veio da API — o site pode ter mudado.")
+
+    if estado["avisou_sessao_expirada"]:
+        estado["avisou_sessao_expirada"] = False
+        salvar_estado(estado)
+        enviar_telegram("✅ Sessão da Foco Market renovada. O alerta voltou a funcionar.")
+
+    if estado["vistos"] is None:
+        estado["vistos"] = sorted(str(e["id"]) for e in eventos)
+        salvar_estado(estado)
+        enviar_telegram(
+            f"✅ <b>Alerta ativado.</b>\n{len(eventos)} eventos POOL já cadastrados na Foco Market. "
+            "A partir de agora aviso aqui cada evento POOL novo."
+        )
+        print(f"Primeira execução: {len(eventos)} eventos POOL registrados.")
+        return
+
+    vistos = set(estado["vistos"])
+    novos = sorted(
+        (e for e in eventos if str(e["id"]) not in vistos),
+        key=lambda e: (e["date"], e["name"]),
+    )
+    for grupo in avisar_novos(novos):
+        # Salva a cada envio: se algo falhar no meio, não repete o que já foi avisado.
+        vistos.update(str(e["id"]) for e in grupo)
+        estado["vistos"] = sorted(vistos)
+        salvar_estado(estado)
+
+    print(f"{len(eventos)} eventos POOL na Foco Market, {len(novos)} novos.")
+
+
+if __name__ == "__main__":
+    main()
