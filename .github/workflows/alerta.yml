@@ -1,0 +1,45 @@
+name: Alerta de eventos POOL
+
+on:
+  schedule:
+    # A cada 15 minutos (horário UTC). O GitHub pode atrasar alguns minutos em horários de pico.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: # botão "Run workflow" para testar na hora
+
+permissions:
+  contents: write # para salvar o estado.json no repositório
+
+concurrency:
+  group: alerta-provas
+  cancel-in-progress: false
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Verificar eventos POOL novos
+        run: python monitor.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FOCO_COOKIE: ${{ secrets.FOCO_COOKIE }}
+
+      - name: Salvar eventos já vistos
+        if: success() || failure()
+        run: |
+          git add estado.json || exit 0
+          git diff --cached --quiet && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Atualiza eventos vistos"
+          git push
