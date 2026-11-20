@@ -1,7 +1,10 @@
 # Alerta de eventos POOL da Foco Market no Telegram
 
-A cada 15 minutos o GitHub consulta a Foco Market com a sua sessão, pega **só os eventos POOL**
-futuros e manda no Telegram cada evento novo: nome, data, cidade, vagas, nível mínimo e prazo de cadastro.
+A cada 15 minutos o GitHub consulta a Foco Market com a sua sessão, pega **só os eventos POOL
+de PR e SC** e manda no Telegram cada evento novo: nome, data, cidade, vagas, nível mínimo e prazo de cadastro.
+
+Para mudar os estados, edite a linha `ESTADOS = {"PR": 16, "SC": 24}` no `monitor.py`
+(os códigos de todos os estados estão no comentário logo acima dela).
 
 Por que não usa sua senha: o login da Foco Market tem captcha, e robô não passa por captcha.
 Então você faz o login uma vez no navegador e entrega ao robô o **cookie da sessão**

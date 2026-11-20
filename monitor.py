@@ -1,7 +1,7 @@
 """Avisa no Telegram quando um evento POOL novo é cadastrado na Foco Market.
 
-Cada execução: busca todos os eventos POOL futuros, compara com os já vistos
-(estado.json) e manda mensagem para os novos.
+Cada execução: busca os eventos POOL futuros dos estados escolhidos, compara
+com os já vistos (estado.json) e manda mensagem para os novos.
 """
 import json
 import os
@@ -17,6 +17,12 @@ SITE = "https://www.focomarket.com.br"
 URL_API = SITE + "/next-api/competition/future-list"
 URL_EVENTOS = SITE + "/competition/future"
 ARQUIVO_ESTADO = Path(__file__).with_name("estado.json")
+
+# Estados monitorados: sigla -> código do estado na Foco Market.
+# Para incluir outro, acrescente a sigla e o código desta lista:
+# AC 38, AL 2, AP 3, AM 4, BA 5, CE 6, DF 7, ES 8, GO 9, MA 10, MT 11, MS 12, MG 13, PA 14,
+# PB 15, PR 16, PE 17, PI 18, RJ 19, RN 20, RS 21, RO 22, RR 23, SC 24, SP 25, SE 26, TO 27
+ESTADOS = {"PR": 16, "SC": 24}
 NAVEGADOR = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
@@ -60,20 +66,28 @@ def buscar_eventos_pool():
         "CompetitionSearch[future_list_date_to]": ate,
     }
 
-    eventos, pagina, total_paginas = [], 1, 1
-    while pagina <= total_paginas:
-        r = sessao.get(URL_API, params={**filtros, "page": pagina}, timeout=30, allow_redirects=False)
-        if r.is_redirect or (r.status_code in (401, 403) and "login" in r.text.lower()):
-            raise SessaoExpirada()
-        if r.status_code != 200:
-            raise RuntimeError(f"Foco Market respondeu HTTP {r.status_code}: {r.text[:300]}")
-        dados = r.json()
-        eventos.extend(dados["items"])
-        total_paginas = dados["_meta"]["pageCount"]
-        pagina += 1
-        time.sleep(0.5)  # sem pressa: não sobrecarregar o site
+    eventos = {}
+    for codigo_estado in ESTADOS.values():
+        pagina, total_paginas = 1, 1
+        while pagina <= total_paginas:
+            params = {**filtros, "CompetitionSearch[state_id]": codigo_estado, "page": pagina}
+            r = sessao.get(URL_API, params=params, timeout=30, allow_redirects=False)
+            if r.is_redirect or (r.status_code in (401, 403) and "login" in r.text.lower()):
+                raise SessaoExpirada()
+            if r.status_code != 200:
+                raise RuntimeError(f"Foco Market respondeu HTTP {r.status_code}: {r.text[:300]}")
+            dados = r.json()
+            for e in dados["items"]:
+                eventos[e["id"]] = e
+            total_paginas = dados["_meta"]["pageCount"]
+            pagina += 1
+            time.sleep(0.5)  # sem pressa: não sobrecarregar o site
 
-    return [e for e in eventos if e.get("isPool")]
+    # Confere de novo aqui: mesmo se o site ignorar algum filtro, só passa POOL dos ESTADOS.
+    return [
+        e for e in eventos.values()
+        if e.get("isPool") and (e.get("state") or {}).get("abbreviation") in ESTADOS
+    ]
 
 
 # ---------- Telegram ----------
@@ -178,7 +192,7 @@ def main():
         sys.exit("Sessão da Foco Market expirada: atualize o FOCO_COOKIE.")
 
     if not eventos:
-        sys.exit("Nenhum evento POOL veio da API — o site pode ter mudado.")
+        sys.exit(f"Nenhum evento POOL em {'/'.join(ESTADOS)} veio da API — o site pode ter mudado.")
 
     if estado["avisou_sessao_expirada"]:
         estado["avisou_sessao_expirada"] = False
@@ -189,8 +203,9 @@ def main():
         estado["vistos"] = sorted(str(e["id"]) for e in eventos)
         salvar_estado(estado)
         enviar_telegram(
-            f"✅ <b>Alerta ativado.</b>\n{len(eventos)} eventos POOL já cadastrados na Foco Market. "
-            "A partir de agora aviso aqui cada evento POOL novo."
+            f"✅ <b>Alerta ativado ({'/'.join(ESTADOS)}).</b>\n{len(eventos)} eventos POOL já "
+            f"cadastrados na Foco Market em {' e '.join(ESTADOS)}. "
+            "A partir de agora aviso aqui cada evento POOL novo desses estados."
         )
         print(f"Primeira execução: {len(eventos)} eventos POOL registrados.")
         return
