@@ -176,16 +176,10 @@ def formatar_evento(e):
 
 
 def avisar_novos(novos):
-    # Até 5 eventos: uma mensagem cada. Mais que isso (cadastro em lote): agrupa de 10 em 10.
-    tamanho = 1 if len(novos) <= 5 else 10
-    for i in range(0, len(novos), tamanho):
-        grupo = novos[i:i + tamanho]
-        titulo = "🏁 <b>Novo evento POOL na Foco Market</b>" if len(grupo) == 1 else (
-            f"🏁 <b>{len(grupo)} novos eventos POOL na Foco Market</b>"
-        )
-        corpo = "\n\n".join(formatar_evento(e) for e in grupo)
-        enviar_telegram(f"{titulo}\n\n{corpo}")
-        yield grupo
+    # Uma mensagem por evento, sempre: assim dá para encaminhar cada evento separado.
+    for e in novos:
+        enviar_telegram(f"🏁 <b>Novo evento POOL na Foco Market</b>\n\n{formatar_evento(e)}")
+        yield e
 
 
 # ---------- Estado ----------
@@ -270,9 +264,9 @@ def main():
         (e for e in eventos if str(e["id"]) not in vistos),
         key=lambda e: (e["date"], e["name"]),
     )
-    for grupo in avisar_novos(novos):
+    for e in avisar_novos(novos):
         # Salva a cada envio: se algo falhar no meio, não repete o que já foi avisado.
-        vistos.update(str(e["id"]) for e in grupo)
+        vistos.add(str(e["id"]))
         estado["vistos"] = sorted(vistos)
         salvar_estado(estado)
 

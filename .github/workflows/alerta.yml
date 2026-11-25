@@ -17,7 +17,7 @@ concurrency:
 jobs:
   verificar:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15 # folga para muitos eventos novos de uma vez (1 mensagem por evento)
     steps:
       - uses: actions/checkout@v5
 
@@ -36,7 +36,7 @@ jobs:
           FOCO_COOKIE: ${{ secrets.FOCO_COOKIE }}
 
       - name: Salvar eventos já vistos
-        if: success() || failure()
+        if: always() # salva até se a execução estourar o tempo, para não repetir avisos
         run: |
           git add estado.json || exit 0
           git diff --cached --quiet && exit 0
