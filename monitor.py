@@ -151,7 +151,9 @@ def formatar_evento(e):
     if uf:
         local = f"{local} / {uf}" if local else uf
 
-    linhas = [f"<b>{escape(e['name'])}</b>", f"📅 {data}   📍 {escape(local)}"]
+    linhas = [f"<b>{escape(e['name'])}</b>", f"Data: {data}"]
+    if local:
+        linhas.append(f"Local: {escape(local)}")
     esporte = (e.get("sport") or {}).get("name")
     selo = (e.get("partnershipBadge") or {}).get("label")
     detalhe = " · ".join(x for x in (esporte, selo) if x)
@@ -166,19 +168,19 @@ def formatar_evento(e):
             texto_vagas = f"Vagas restantes: {vagas['availableSlots']}"
         if vagas.get("minimumLevelName"):
             texto_vagas += f" (nível mínimo: {vagas['minimumLevelName']})"
-        linhas.append("🎟 " + escape(texto_vagas))
+        linhas.append(escape(texto_vagas))
 
     if e.get("formatedRegisterDate"):
-        linhas.append(f"⏳ Cadastro até {escape(e['formatedRegisterDate'])}")
-    link = LINK_EVENTO.format(id=e["id"])
-    linhas.append(f'🔗 <a href="{escape(link)}">Abrir o evento</a>')
+        linhas.append(f"Cadastro até {escape(e['formatedRegisterDate'])}")
+    # O endereço vai escrito por extenso (o Telegram deixa clicável sozinho).
+    linhas.append(LINK_EVENTO.format(id=e["id"]))
     return "\n".join(linhas)
 
 
 def avisar_novos(novos):
     # Uma mensagem por evento, sempre: assim dá para encaminhar cada evento separado.
     for e in novos:
-        enviar_telegram(f"🏁 <b>Novo evento POOL na Foco Market</b>\n\n{formatar_evento(e)}")
+        enviar_telegram(f"<b>Novo evento POOL na Foco Market</b>\n\n{formatar_evento(e)}")
         yield e
 
 
