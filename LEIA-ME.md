@@ -74,7 +74,12 @@ Cada verificação leva menos de 1 minuto, mas o GitHub cobra 1 minuto cheio.
   Se ficar 60 dias sem nenhum evento novo, o GitHub pausa o agendamento e manda e-mail
   (difícil acontecer: aparecem eventos toda semana).
 - **Privado:** só você vê tudo, mas o grátis é 2.000 minutos/mês. A cada 15 minutos daria ~2.900,
-  então mude o `cron` em `.github/workflows/alerta.yml` para `"*/30 * * * *"` (a cada 30 minutos).
+  então mude o `cron` em `.github/workflows/alerta.yml` para `"7,37 * * * *"` (a cada 30 minutos).
 
 O GitHub pode atrasar a execução alguns minutos em horários de pico.
 Se algo der errado (site mudou, bloqueio, sessão), a execução fica vermelha e o GitHub manda e-mail.
+
+Se a Foco Market estiver em manutenção ou fora do ar, o robô tenta 3 vezes e deixa para a próxima
+execução, sem ficar vermelho. Só fica vermelho (e avisa no Telegram) se o site passar de 6 horas
+fora do ar; quando ele voltar, chega "✅ A Foco Market voltou". Para mudar as 6 horas, edite
+`LIMITE_FORA_DO_AR` no `monitor.py`.
