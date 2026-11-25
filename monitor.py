@@ -208,7 +208,7 @@ def main():
     except SessaoExpirada:
         if not estado["avisou_sessao_expirada"]:
             enviar_telegram(
-                "⚠️ <b>A sessão da Foco Market expirou.</b>\n"
+                "<b>A sessão da Foco Market expirou.</b>\n"
                 "O alerta está parado. Entre de novo no site marcando \"Lembre-me\" e "
                 "atualize o secret FOCO_COOKIE no GitHub (passo 3 do LEIA-ME)."
             )
@@ -228,7 +228,7 @@ def main():
             return
         if not estado.get("avisou_fora_do_ar"):
             enviar_telegram(
-                f"⚠️ <b>A Foco Market está fora do ar há {horas:.0f} horas.</b>\n"
+                f"<b>A Foco Market está fora do ar há {horas:.0f} horas.</b>\n"
                 "O alerta continua tentando e avisa aqui quando o site voltar."
             )
             estado["avisou_fora_do_ar"] = True
@@ -240,7 +240,7 @@ def main():
         del estado["fora_do_ar_desde"]
         salvar_estado(estado)
         if avisou:
-            enviar_telegram("✅ A Foco Market voltou. O alerta está funcionando de novo.")
+            enviar_telegram("A Foco Market voltou. O alerta está funcionando de novo.")
 
     if not eventos:
         sys.exit(f"Nenhum evento POOL em {'/'.join(ESTADOS)} veio da API — o site pode ter mudado.")
@@ -248,13 +248,13 @@ def main():
     if estado["avisou_sessao_expirada"]:
         estado["avisou_sessao_expirada"] = False
         salvar_estado(estado)
-        enviar_telegram("✅ Sessão da Foco Market renovada. O alerta voltou a funcionar.")
+        enviar_telegram("Sessão da Foco Market renovada. O alerta voltou a funcionar.")
 
     if estado["vistos"] is None:
         estado["vistos"] = sorted(str(e["id"]) for e in eventos)
         salvar_estado(estado)
         enviar_telegram(
-            f"✅ <b>Alerta ativado ({'/'.join(ESTADOS)}).</b>\n{len(eventos)} eventos POOL já "
+            f"<b>Alerta ativado ({'/'.join(ESTADOS)}).</b>\n{len(eventos)} eventos POOL já "
             f"cadastrados na Foco Market em {' e '.join(ESTADOS)}. "
             "A partir de agora aviso aqui cada evento POOL novo desses estados."
         )

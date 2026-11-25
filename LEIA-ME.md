@@ -44,7 +44,7 @@ Faça no Chrome do computador:
 
 Esse valor dá acesso à sua conta: cole só no GitHub (passo 4), nunca em conversa ou e-mail.
 
-Quando a sessão expirar, o bot manda no Telegram "⚠️ A sessão da Foco Market expirou".
+Quando a sessão expirar, o bot manda no Telegram "A sessão da Foco Market expirou".
 É só repetir este passo 3 e atualizar o secret `FOCO_COOKIE`. Quando voltar, ele avisa
 e manda os eventos que apareceram enquanto estava parado.
 
@@ -62,7 +62,7 @@ e manda os eventos que apareceram enquanto estava parado.
 
    Os secrets ficam criptografados: ninguém vê depois de salvos, nem em repositório público.
 4. Vá em **Actions → Alerta de eventos POOL → Run workflow** para testar.
-   Na primeira vez chega no Telegram "✅ Alerta ativado. N eventos POOL já cadastrados".
+   Na primeira vez chega no Telegram "Alerta ativado. N eventos POOL já cadastrados".
    Daí em diante, só chega mensagem quando aparece evento POOL novo.
 
 ## Público ou privado? (custo zero nos dois)
@@ -81,5 +81,5 @@ Se algo der errado (site mudou, bloqueio, sessão), a execução fica vermelha e
 
 Se a Foco Market estiver em manutenção ou fora do ar, o robô tenta 3 vezes e deixa para a próxima
 execução, sem ficar vermelho. Só fica vermelho (e avisa no Telegram) se o site passar de 6 horas
-fora do ar; quando ele voltar, chega "✅ A Foco Market voltou". Para mudar as 6 horas, edite
+fora do ar; quando ele voltar, chega "A Foco Market voltou". Para mudar as 6 horas, edite
 `LIMITE_FORA_DO_AR` no `monitor.py`.
