@@ -7,7 +7,7 @@ import json
 import os
 import sys
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 
@@ -16,6 +16,8 @@ import requests
 SITE = "https://www.focomarket.com.br"
 URL_API = SITE + "/next-api/competition/future-list"
 URL_EVENTOS = SITE + "/competition/future"
+# Página de um evento: {id} é trocado pelo número do evento.
+LINK_EVENTO = SITE + "/competition/information?id={id}"
 ARQUIVO_ESTADO = Path(__file__).with_name("estado.json")
 
 # Estados monitorados: sigla -> código do estado na Foco Market.
@@ -37,6 +39,15 @@ class SessaoExpirada(Exception):
     pass
 
 
+class SiteForaDoAr(Exception):
+    """Site em manutenção ou instável (HTTP 5xx, 429, sem conexão). Costuma passar sozinho."""
+
+
+# Site fora do ar por menos que isso: a execução fica verde e tenta de novo na próxima.
+# Passou disso: fica vermelha (o GitHub manda e-mail) e avisa no Telegram uma vez.
+LIMITE_FORA_DO_AR = timedelta(hours=6)
+
+
 # ---------- Foco Market ----------
 
 def limpar_cookie(bruto):
@@ -48,6 +59,22 @@ def limpar_cookie(bruto):
     return "; ".join(
         p for p in partes if not p.split("=", 1)[0].strip().lower().startswith(("__cf", "cf_"))
     )
+
+
+def pedir_com_paciencia(sessao, params):
+    """Faz a consulta; se o site estiver instável, tenta mais 2 vezes antes de desistir."""
+    for espera in (15, 30, None):
+        try:
+            r = sessao.get(URL_API, params=params, timeout=30, allow_redirects=False)
+            if r.status_code < 500 and r.status_code != 429:
+                return r
+            problema = f"HTTP {r.status_code}"
+        except (requests.ConnectionError, requests.Timeout) as erro:
+            problema = f"sem resposta ({type(erro).__name__})"
+        if espera is None:
+            raise SiteForaDoAr(problema)
+        print(f"Foco Market instável ({problema}); tentando de novo em {espera}s.")
+        time.sleep(espera)
 
 
 def buscar_eventos_pool():
@@ -71,7 +98,7 @@ def buscar_eventos_pool():
         pagina, total_paginas = 1, 1
         while pagina <= total_paginas:
             params = {**filtros, "CompetitionSearch[state_id]": codigo_estado, "page": pagina}
-            r = sessao.get(URL_API, params=params, timeout=30, allow_redirects=False)
+            r = pedir_com_paciencia(sessao, params)
             if r.is_redirect or (r.status_code in (401, 403) and "login" in r.text.lower()):
                 raise SessaoExpirada()
             if r.status_code != 200:
@@ -143,6 +170,8 @@ def formatar_evento(e):
 
     if e.get("formatedRegisterDate"):
         linhas.append(f"⏳ Cadastro até {escape(e['formatedRegisterDate'])}")
+    link = LINK_EVENTO.format(id=e["id"])
+    linhas.append(f'🔗 <a href="{escape(link)}">Abrir o evento</a>')
     return "\n".join(linhas)
 
 
@@ -155,7 +184,7 @@ def avisar_novos(novos):
             f"🏁 <b>{len(grupo)} novos eventos POOL na Foco Market</b>"
         )
         corpo = "\n\n".join(formatar_evento(e) for e in grupo)
-        enviar_telegram(f"{titulo}\n\n{corpo}\n\n{URL_EVENTOS}")
+        enviar_telegram(f"{titulo}\n\n{corpo}")
         yield grupo
 
 
@@ -190,6 +219,32 @@ def main():
             estado["avisou_sessao_expirada"] = True
             salvar_estado(estado)
         sys.exit("Sessão da Foco Market expirada: atualize o FOCO_COOKIE.")
+    except SiteForaDoAr as erro:
+        agora = datetime.now(timezone.utc)
+        if not estado.get("fora_do_ar_desde"):
+            estado["fora_do_ar_desde"] = agora.isoformat(timespec="seconds")
+            salvar_estado(estado)
+        tempo = agora - datetime.fromisoformat(estado["fora_do_ar_desde"])
+        horas = tempo.total_seconds() / 3600
+        if tempo < LIMITE_FORA_DO_AR:
+            print(f"Foco Market fora do ar ({erro}) há {horas:.1f} h. "
+                  "Normal em manutenção: tenta de novo na próxima execução.")
+            return
+        if not estado.get("avisou_fora_do_ar"):
+            enviar_telegram(
+                f"⚠️ <b>A Foco Market está fora do ar há {horas:.0f} horas.</b>\n"
+                "O alerta continua tentando e avisa aqui quando o site voltar."
+            )
+            estado["avisou_fora_do_ar"] = True
+            salvar_estado(estado)
+        sys.exit(f"Foco Market fora do ar ({erro}) há {horas:.0f} horas.")
+
+    if estado.get("fora_do_ar_desde"):
+        avisou = estado.pop("avisou_fora_do_ar", False)
+        del estado["fora_do_ar_desde"]
+        salvar_estado(estado)
+        if avisou:
+            enviar_telegram("✅ A Foco Market voltou. O alerta está funcionando de novo.")
 
     if not eventos:
         sys.exit(f"Nenhum evento POOL em {'/'.join(ESTADOS)} veio da API — o site pode ter mudado.")
