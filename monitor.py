@@ -16,6 +16,8 @@ import requests
 SITE = "https://www.focomarket.com.br"
 URL_API = SITE + "/next-api/competition/future-list"
 URL_EVENTOS = SITE + "/competition/future"
+# Página de um evento: {id} é trocado pelo número do evento.
+LINK_EVENTO = SITE + "/competition/information?id={id}"
 ARQUIVO_ESTADO = Path(__file__).with_name("estado.json")
 
 # Estados monitorados: sigla -> código do estado na Foco Market.
@@ -168,6 +170,8 @@ def formatar_evento(e):
 
     if e.get("formatedRegisterDate"):
         linhas.append(f"⏳ Cadastro até {escape(e['formatedRegisterDate'])}")
+    link = LINK_EVENTO.format(id=e["id"])
+    linhas.append(f'🔗 <a href="{escape(link)}">Abrir o evento</a>')
     return "\n".join(linhas)
 
 
@@ -180,7 +184,7 @@ def avisar_novos(novos):
             f"🏁 <b>{len(grupo)} novos eventos POOL na Foco Market</b>"
         )
         corpo = "\n\n".join(formatar_evento(e) for e in grupo)
-        enviar_telegram(f"{titulo}\n\n{corpo}\n\n{URL_EVENTOS}")
+        enviar_telegram(f"{titulo}\n\n{corpo}")
         yield grupo
 
 
